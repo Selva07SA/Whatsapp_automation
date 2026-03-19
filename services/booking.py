@@ -18,7 +18,6 @@ def normalize_user(user):
 
 
 def format_menu(title, options):
-    # options: list of (key, label)
     lines = [title, ""]
     for key, label in options:
         lines.append(f"[{key}] {label}")
@@ -28,11 +27,10 @@ def format_menu(title, options):
 
 
 def format_two_columns(options):
-    # options: list of (key, label)
     if not options:
         return ""
     max_label = max(len(label) for _, label in options)
-    col_width = max_label + 6  # room for [k] and spacing
+    col_width = max_label + 6
     lines = []
     for i in range(0, len(options), 2):
         left = options[i]
@@ -57,7 +55,7 @@ def handle_message(user, msg):
         set_state(user, "date")
         return format_menu(
             "Welcome! Select date:",
-            [("1", "Tomorrow"), ("2", "Day After")]
+            [("1", "Today"), ("2", "Tomorrow"), ("3", "Day After")]
         )
 
     # DATE
@@ -65,13 +63,15 @@ def handle_message(user, msg):
         today = datetime.today()
 
         if msg == "1":
-            date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+            date = today.strftime("%Y-%m-%d")
         elif msg == "2":
+            date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        elif msg == "3":
             date = (today + timedelta(days=2)).strftime("%Y-%m-%d")
         else:
             return format_menu(
                 "Invalid option. Select date:",
-                [("1", "Tomorrow"), ("2", "Day After")]
+                [("1", "Today"), ("2", "Tomorrow"), ("3", "Day After")]
             )
 
         set_data(user, "date", date)
@@ -110,13 +110,24 @@ def handle_message(user, msg):
             set_state(user, "date")
             return format_menu(
                 "Select date:",
-                [("1", "Tomorrow"), ("2", "Day After")]
+                [("1", "Today"), ("2", "Tomorrow"), ("3", "Day After")]
             )
 
         if msg not in SLOTS:
             return "Choose valid slot (1-10)."
 
+        date = get_data(user, "date")
+        try:
+            booked = get_booked_slots(date)
+        except Exception:
+            logging.exception("Failed to load booked slots. user=%s date=%s", user, date)
+            reset_user(user)
+            return "Sorry, couldn't load slots right now. Try again later."
+
         slot = SLOTS[msg]
+        if slot in booked:
+            return "That slot was just booked. Please choose another slot."
+
         set_data(user, "slot", slot)
 
         otp = generate_otp(user)
@@ -133,6 +144,17 @@ def handle_message(user, msg):
         if verify_otp(user, msg):
             date = get_data(user, "date")
             slot = get_data(user, "slot")
+
+            try:
+                booked = get_booked_slots(date)
+            except Exception:
+                logging.exception("Failed to load booked slots. user=%s date=%s", user, date)
+                reset_user(user)
+                return "Sorry, couldn't load slots right now. Try again later."
+
+            if slot in booked:
+                reset_user(user)
+                return "That slot was already booked. Please start again and choose another slot."
 
             try:
                 insert_booking(user, date, slot)

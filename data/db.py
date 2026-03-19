@@ -1,5 +1,5 @@
 import os
-import psycopg2
+import requests
 
 try:
     from dotenv import load_dotenv
@@ -7,33 +7,32 @@ try:
 except Exception:
     pass
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+SHEET_WEBAPP_URL = os.getenv("SHEET_WEBAPP_URL")
 
-from contextlib import contextmanager
 
-@contextmanager
-def get_conn():
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL is not set")
-    conn = psycopg2.connect(DATABASE_URL)
+def _post(payload):
+    if not SHEET_WEBAPP_URL:
+        raise RuntimeError("SHEET_WEBAPP_URL is not set")
+    res = requests.post(
+        SHEET_WEBAPP_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"},
+        timeout=15,
+    )
+    res.raise_for_status()
     try:
-        yield conn
-    finally:
-        conn.close()
+        return res.json()
+    except ValueError:
+        # If Apps Script returns text/plain, try to parse JSON from text
+        return requests.models.json.loads(res.text)
 
 
 def get_booked_slots(date):
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT slot FROM bookings WHERE booking_date=%s", (date,))
-            return [row[0] for row in cursor.fetchall()]
+    data = _post({"action": "get_booked", "date": date})
+    return data.get("booked", [])
 
 
 def insert_booking(user, date, slot):
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO bookings (user_phone, booking_date, slot) VALUES (%s, %s, %s)",
-                (user, date, slot)
-            )
-        conn.commit()
+    data = _post({"action": "insert_booking", "user": user, "date": date, "slot": slot})
+    if not data.get("ok"):
+        raise RuntimeError(data.get("error", "Unknown error"))
